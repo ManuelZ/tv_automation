@@ -50,7 +50,9 @@ def box_center_format_to_corner_format(box):
     return [center_x - (0.5 * width), center_y - (0.5 * height), width, height]
 
 
-def get_boxes(model_outputs: np.ndarray):
+def get_boxes(
+    model_outputs: np.ndarray, score_threshold=0.25, nms_threshold=0.45, eta=0.5
+):
     """Extract bounding boxes from model outputs using non-maximum suppression."""
 
     outputs = cv2.transpose(model_outputs[0])  # n_rows x n_classes
@@ -69,7 +71,11 @@ def get_boxes(model_outputs: np.ndarray):
             scores.append(max_score)
 
     nms_boxes_indices = cv2.dnn.NMSBoxes(
-        boxes, scores, score_threshold=0.25, nms_threshold=0.45, eta=0.5
+        boxes,
+        scores,
+        score_threshold,
+        nms_threshold,
+        eta,
     )
 
     return [boxes[i] for i in nms_boxes_indices]
@@ -77,7 +83,7 @@ def get_boxes(model_outputs: np.ndarray):
 
 def draw_boxes(image, boxes, h_scale=1.0, w_scale=1.0, x_trans=0.0, y_trans=0.0):
     """
-    Boxes have to be represented the using the coordinates of the top-left corner
+    The parameter `boxes` has to be represented the using the coordinates of the top-left corner
     along with the width and height.
     """
 
@@ -100,15 +106,13 @@ def draw_boxes(image, boxes, h_scale=1.0, w_scale=1.0, x_trans=0.0, y_trans=0.0)
     return im
 
 
-def get_image_patch(image, top_left, bottom_right):
+def crop_image_patch(image, top_left, bottom_right):
     """Extract a rectangular patch from an image."""
 
     x1, y1 = top_left
     x2, y2 = bottom_right
 
-    patch = image[y1:y2, x1:x2]
-
-    return patch
+    return image[y1:y2, x1:x2]
 
 
 def hough_line_to_points(r, theta):
@@ -162,7 +166,8 @@ def draw_lines_on_image(image, lines, color=(0, 0, 255), thickness=1):
 
 
 def equalize(image, eq_method="CLAHE"):
-    """ """
+    """Apply histogram equalization to an image using the specified method."""
+
     if eq_method == "CLAHE":
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         return clahe.apply(image)
@@ -212,18 +217,23 @@ def create_rot_mat(angle, h, w):
     return cv2.getRotationMatrix2D(((w - 1) / 2.0, (h - 1) / 2.0), angle=angle, scale=1)
 
 
-def rotate_image(image, R):
-    """Rotate the image using the given rotation matrix."""
+def rotate_image_to_horizontal(image, angle):
+    """
+    angle in radians
+    """
+
+    rot_angle = degrees(angle) - 90
 
     if len(image.shape) == 3:
         h, w, _ = image.shape
     else:
         h, w = image.shape
 
-    return cv2.warpAffine(image, R, (w, h))
+    rot_mat = create_rot_mat(rot_angle, h, w)
+    return cv2.warpAffine(image, rot_mat, (w, h))
 
 
-def get_hough_lines(edges, n_std=0.25, threshold=80):
+def get_hough_lines(edges, n_std=1.0, threshold=80):
     """ """
 
     lines = cv2.HoughLines(
@@ -267,13 +277,12 @@ def rotate_lines_to_horizontal(lines, im_h, im_w):
         cx = im_w / 2
         cy = im_h / 2
 
-        angle = -(90 - degrees(theta))
-
-        R = cv2.getRotationMatrix2D((cx, cy), angle=angle, scale=1)
+        angle = degrees(theta) - 90
+        rot_mat = cv2.getRotationMatrix2D((cx, cy), angle=angle, scale=1)
 
         pts = np.array([[x1, y1], [x2, y2]])
         pts = pts.reshape((-1, 1, 2))
-        pts = cv2.transform(pts, R)
+        pts = cv2.transform(pts, rot_mat)
 
         # The rotated points
         x1, y1, x2, y2 = pts.reshape(-1)
@@ -358,9 +367,10 @@ def preprocess_image(image, target_size):
     return resized_image, top_left_x, top_left_y, h_ratio, w_ratio
 
 
-def infer(net, image):
+def detect_objects(net, image):
     """
-    Perform inference on the input image using a pre-trained model and extract bounding boxes from the model's outputs.
+    Perform detect_objectsence on the input image using a pre-trained detection model and extract bounding boxes from the
+    model's outputs.
 
     Args:
         net (cv2.dnn_Net): The pre-trained deep learning model in OpenCV's DNN module.
@@ -370,6 +380,7 @@ def infer(net, image):
         list: A list of bounding boxes predicted by the model. Each box is typically represented as a list or array
               containing coordinates and dimensions, depending on the implementation of the `get_boxes` function.
     """
+
     blob = cv2.dnn.blobFromImage(
         image,
         scalefactor=1 / 255,
@@ -412,7 +423,7 @@ def compute_bounding_box_coordinates(box, top_left_x, top_left_y, h_ratio, w_rat
             - The coordinates of the bottom-right corner (x, y) of the bounding box in the original image.
 
     """
-    # Extract box coordinates and dimensions
+
     x, y, width, height = box
 
     # Calculate top-left and bottom-right coordinates in the original image
@@ -426,6 +437,63 @@ def compute_bounding_box_coordinates(box, top_left_x, top_left_y, h_ratio, w_rat
     )
 
     return top_left, bottom_right
+
+
+def mask_image(image, angle):
+    """
+    Creates a binary mask based on the y-coordinates of detected lines, dilates the mask, and applies it to the input
+    image. The result is an image where only the regions specified by the mask are visible.
+
+    Args:
+        angle: in radians
+    """
+
+    im_h, im_w, _ = image.shape
+
+    # Rotate image patch and lines
+    im_patch_rotated = rotate_image_to_horizontal(im_patch, angle)
+    rotated_lines = rotate_lines_to_horizontal(filtered_lines, im_h, im_w)
+
+    min_y, max_y = get_min_max_y(rotated_lines)
+
+    # Create mask
+    mask = np.zeros((im_h, im_w), dtype=np.uint8)
+    mask[min_y:max_y, MARGIN_X:-MARGIN_X] = 255
+    kernel = np.array([[0, 1, 0], [0, 1, 0], [0, 1, 0]], dtype=np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=6)
+
+    masked_image = cv2.bitwise_and(im_patch_rotated, im_patch_rotated, mask=mask)
+
+    return masked_image, max_y
+
+
+def call_while_error(func, varying_parameter, factor, max_retries=3, **kwargs):
+    """
+    Repeatedly call a function with the given keyword arguments until it succeeds or the maximum number of
+    retries is reached.
+
+    After each failure, it will incrementally adjust the `n_std` parameter by multiplying it by 1.1 to modify
+    the function's behavior on subsequent retries.
+
+    """
+    retries = 0
+    while retries < max_retries:
+        try:
+            return func(**kwargs)
+        except Exception as e:
+            retries += 1
+            kwargs[varying_parameter] *= factor
+            print(f"Error: '{e}'.")
+            print(
+                "Retrying ({}/{}) with {}={:.2f}".format(
+                    retries,
+                    max_retries,
+                    varying_parameter,
+                    kwargs[varying_parameter],
+                )
+            )
+            if retries >= max_retries:
+                raise
 
 
 if __name__ == "__main__":
@@ -454,57 +522,53 @@ if __name__ == "__main__":
         image_resized, trans_x, trans_y, h_ratio, w_ratio = preprocess_image(
             image_original, TARGET_SIZE
         )
-        boxes = infer(NET, image_resized)
+        boxes = detect_objects(NET, image_resized)
         top_left, bottom_right = compute_bounding_box_coordinates(
             boxes[0], trans_x, trans_y, h_ratio, w_ratio
         )
 
-        image_resized_drawn = draw_boxes(image_resized, boxes)
-        image_original_drawn = draw_boxes(
-            image_original, boxes, (1 / h_ratio), (1 / w_ratio), trans_x, trans_y
-        )
-
         # Process image
-        im_patch = get_image_patch(image_original, top_left, bottom_right)
+        im_patch = crop_image_patch(image_original, top_left, bottom_right)
         im_patch_illuminated = equalize_luminance(im_patch, "lab", eq_method="CLAHE")
         im_patch_gray = cv2.cvtColor(im_patch_illuminated, cv2.COLOR_BGR2GRAY)
         im_patch_blurred = cv2.GaussianBlur(im_patch_gray, (3, 3), sigmaX=0, sigmaY=0)
         im_patch_edges = cv2.Canny(im_patch_blurred, threshold1=50, threshold2=220)
 
         try:
-            # Identify lines
-            filtered_lines, mean_theta = get_hough_lines(im_patch_edges, n_std=1)
+            # Attempt to call get_hough_lines up to 3 times, adjusting the `n_std` parameter on each attempt
+            # The `n_std` parameter determines the range around the mean angle (`mean_theta`) to include lines.
+            # Initially, the range is narrow, but with each retry, `n_std` is increased by 10% to broaden the range.
+            # This approach helps to ensure that more lines are considered if the initial attempts fail to find
+            # sufficient lines.
+            filtered_lines, mean_lines_angle = call_while_error(
+                get_hough_lines,
+                max_retries=3,
+                n_std=1.0,
+                varying_parameter="n_std",
+                factor=1.25,
+                edges=im_patch_edges,
+            )
         except Exception as e:
-            cv2.imshow("Error", im_patch_edges)
             print(e)
+            cv2.imshow("Error", im_patch_edges)
             cv2.waitKey(0)
             cv2.destroyWindow("Error")
             continue
 
-        im_patch_drawn = draw_hough_lines(im_patch, filtered_lines)
-
-        # Align images to horizontal
-        rot_angle = -(90 - degrees(mean_theta))
-        im_h, im_w, _ = im_patch.shape
-        rot_mat = create_rot_mat(rot_angle, im_h, im_w)
-        im_patch_rotated = rotate_image(im_patch, rot_mat)
-        rotated_lines = rotate_lines_to_horizontal(filtered_lines, im_h, im_w)
-        im_patch_rotated_drawn = draw_lines_on_image(im_patch_rotated, rotated_lines)
-
-        # Create a mask
-        mask = np.zeros((im_h, im_w), dtype=np.uint8)
-        min_y, max_y = get_min_max_y(rotated_lines)
-        mask[min_y:max_y, MARGIN_X:-MARGIN_X] = 255
-        kernel = np.array([[0, 1, 0], [0, 1, 0], [0, 1, 0]], dtype=np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=6)
-
-        im_patch_masked = cv2.bitwise_and(im_patch_rotated, im_patch_rotated, mask=mask)
+        im_patch_masked, max_y = mask_image(im_patch, mean_lines_angle)
 
         selected_app = identify_selected_app(im_patch_masked, max_y, margin_x=MARGIN_X)
-
         print(f"Selected app is: {selected_app}")
 
         if DEBUG:
+            image_resized_drawn = draw_boxes(image_resized, boxes)
+            image_original_drawn = draw_boxes(
+                image_original, boxes, (1 / h_ratio), (1 / w_ratio), trans_x, trans_y
+            )
+            im_patch_drawn = draw_hough_lines(im_patch, filtered_lines)
+            # im_patch_rotated_drawn = draw_lines_on_image(
+            #    im_patch_rotated, rotated_lines
+            # )
             cv2.imshow(f"Boxes on scaled:", image_resized_drawn)
             cv2.imshow(f"Boxes on original", image_original_drawn)
             cv2.imshow(f"Image patch", im_patch)
@@ -513,8 +577,7 @@ if __name__ == "__main__":
             cv2.imshow("Patch - Gray after blurring", im_patch_blurred)
             cv2.imshow("Patch - Edges", im_patch_edges)
             cv2.imshow("Patch - Lines", im_patch_drawn)
-            cv2.imshow("Patch - Rotated", im_patch_rotated)
-            cv2.imshow("Patch - Rotated with lines", im_patch_rotated_drawn)
-            cv2.imshow("Mask", mask)
+            # cv2.imshow("Patch - Rotated", im_patch_rotated)
+            # cv2.imshow("Patch - Rotated with lines", im_patch_rotated_drawn)
             cv2.imshow("Patch - Masked", im_patch_masked)
             cv2.waitKey(0)
