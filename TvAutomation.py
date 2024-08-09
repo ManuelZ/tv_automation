@@ -1,125 +1,247 @@
-import pyjevois
-import libjevois as jevois
-import cv2 as cv
+# Standard Library imports
+from pathlib import Path
+import logging
+from typing import Tuple
+
+# External imports
+try:
+    import pyjevois
+    import libjevois as jevois
+except:
+    print("Not on Jevois, skipping Jevois libraries import.")
+import cv2
 import numpy as np
 
+# Local imports
+from config import APPS, MIN_VARIANCE_OF_LAPLACIAN, TARGET_SIZE, DEBUG, WORLD
+from tv_processing import (
+    center_crop,
+    calc_blur,
+    draw_boxes,
+    get_class_from_prediction,
+)
+from tv_processing import (
+    compute_bounding_box_coordinates,
+    crop_image_patch,
+    equalize_luminance,
+    call_while_error,
+    get_hough_lines,
+    mask_image,
+    identify_selected_app_v1,
+    identify_selected_app_v2,
+    get_boxes,
+    draw_hough_lines,
+)
+from localization import BayesFilter
 
-# @videomapping YUYV 320 336 15.0 YUYV 320 336 15.0 JeVois
-# @email None
-# @address None
-# @copyright None
-# @mainurl None
-# @supporturl None
-# @otherurl None
-# @license GPL v3
-# @distribution Unrestricted
-# @restrictions None
-# @ingroup modules
+
+if "pyjevois" in globals():
+    log_filepath = Path("/", "jevois", "data", "log.log")
+else:
+    log_filepath = Path("log.log")
+
+logging.basicConfig(
+    filename=log_filepath,
+    filemode="a",
+    format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+    level=logging.DEBUG,
+)
+logger = logging.getLogger(__name__)
+
+
+class DummyTimer:
+    def start(self):
+        return
+
+    def stop(self):
+        return
+
+
 class TvAutomation:
-    def __init__(self):
-        self.target_height = 256  # Resized image height passed to network
-        self.target_width = 256  # Resized image width passed to network
-        self.scale = 1.0 / 255  # Value scaling factor applied to input pixels
+    def __init__(self, net_path=None):
+        self.on_jevois = "pyjevois" in globals()
+
+        # Configured camera sensor resolution. Ensure it's the same as the one in videomappings.cfg
+        self.h, self.w = (480, 640)
+
+        # Resized image height passed to network
+        self.target_height, self.target_width = TARGET_SIZE
+
+        # Value scaling factor applied to input pixels
+        self.scale = 1.0 / 255
+        # FIXME: When I use the mean I get no identifications.
         # self.mean = [123.68, 116.77, 103.93]
         self.mean = [0, 0, 0]
-        self.rgb = False  # True if model expects RGB inputs, otherwise it expects BGR
         self.n = 0
+        self.apps = APPS
+        self.classes = list(self.apps.values())
+        self.colors = {
+            "green": (0, 255, 0),
+            "red": (0, 0, 255),
+            "white": (255, 255, 255),
+        }
 
-        # This network takes a while to load from microSD. To avoid timouts at construction,
-        # we will load it in process() instead.
-
-        self.timer = jevois.Timer("TV Automation", 10, jevois.LOG_DEBUG)
-
-    def get_boxes(self, outputs):
-        """ """
-
-        outputs = np.array([cv.transpose(outputs[0])])
-        rows = outputs.shape[1]
-
-        boxes = []
-        scores = []
-
-        for i in range(rows):
-            classes_scores = outputs[0][i][4:]
-            (minScore, maxScore, minClassLoc, (x, maxClassIndex)) = cv.minMaxLoc(
-                classes_scores
+        self.timer = DummyTimer()
+        if self.on_jevois:
+            self.timer = jevois.Timer("TV Automation", 10, jevois.LOG_DEBUG)
+            net_path = Path(
+                pyjevois.share + "dnn", "custom", "tv_apps_detect_and_classify.onnx"
             )
-            if maxScore >= 0.25:
-                box = [
-                    outputs[0][i][0] - (0.5 * outputs[0][i][2]),
-                    outputs[0][i][1] - (0.5 * outputs[0][i][3]),
-                    outputs[0][i][2],
-                    outputs[0][i][3],
-                ]
-                boxes.append(box)
-                scores.append(maxScore)
+        assert net_path is not None and Path(net_path).is_file()
 
-        nms_boxes_indices = cv.dnn.NMSBoxes(boxes, scores, 0.25, 0.45, 0.5)
-        return nms_boxes_indices, boxes
+        self.net = cv2.dnn.readNet(net_path, "")
+        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-    def center_crop(self, image):
-        h, w, _ = image.shape
-        length = min((h, w))
-        out_image = np.zeros((length, length, 3), np.uint8)
+        self.filter = BayesFilter(WORLD)
 
-        start_x = w / 2 - length / 2
-        start_y = h / 2 - length / 2
+    def preprocess_image(self, image):
+        """
+        Preprocesses an image by cropping a centered square region and resizing it to a target size.
 
-        out_image = image[
-            int(start_y) : int(start_y + length),
-            int(start_x) : int(start_x + length),
-        ]
+            1. Crops a square region from the center of the input image.
+            2. Resizes the cropped image to the specified target size while maintaining the aspect ratio.
 
-        return out_image
+        Args:
+            image (numpy.ndarray): The input image array with shape (height, width, channels).
 
-    def process(self, inframe, outframe):
-        if not hasattr(self, "net"):
-            self.classes = ["tv_apps"]
-            self.model = "YOLOv8 ONNX"
-            self.net = cv.dnn.readNet(pyjevois.share + "/dnn/custom/tv_apps.onnx", "")
-            self.net.setPreferableBackend(cv.dnn.DNN_BACKEND_OPENCV)
-            self.net.setPreferableTarget(cv.dnn.DNN_TARGET_CPU)
+        Returns:
+            tuple:
+                - numpy.ndarray: The cropped and resized image with shape (target_size[0], target_size[1], channels).
+                - float: The x-coordinate of the top-left corner of the cropped region in the original image.
+                - float: The y-coordinate of the top-left corner of the cropped region in the original image.
+                - float: The ratio of the target height to the smaller dimension of the original image.
+                - float: The ratio of the target width to the smaller dimension of the original image.
+        """
 
-        original_image = inframe.getCvBGR()
-
-        self.timer.start()
-
-        image = self.center_crop(original_image)
-        image = cv.resize(
-            image, (self.target_width, self.target_height), interpolation=cv.INTER_AREA
+        h_ratio, w_ratio = np.array((self.target_height, self.target_width)) / min(
+            [self.h, self.w]
         )
 
-        blob = cv.dnn.blobFromImage(
+        cropped_image, top_left_x, top_left_y = center_crop(image)
+
+        resized_image = cv2.resize(
+            cropped_image,
+            dsize=(self.target_width, self.target_height),
+            interpolation=cv2.INTER_AREA,
+        )
+        return resized_image, top_left_x, top_left_y, h_ratio, w_ratio
+
+    def detect_objects(self, image):
+        """
+        Perform detect_objectsence on the input image using a pre-trained detection model and extract bounding boxes from the
+        model's outputs.
+
+        Args:
+            image (numpy.ndarray): The input image array with shape (height, width, channels).
+
+        Returns:
+            list: A list of bounding boxes predicted by the model. Each box is typically represented as a list or array
+                  containing coordinates and dimensions, depending on the implementation of the `get_boxes` function.
+        """
+
+        blob = cv2.dnn.blobFromImage(
             image,
             scalefactor=self.scale,
             size=(self.target_height, self.target_width),
-            mean=self.mean,
-            swapRB=self.rgb,
+            swapRB=True,
+            mean=(0, 0, 0),  # Adjust mean values if necessary
             crop=False,
         )
-
         self.net.setInput(blob)
         outputs = self.net.forward()
-        nms_boxes_indices, boxes = self.get_boxes(outputs)
+        results: list[Tuple] = get_class_from_prediction(outputs, classes=self.classes)
+        # return get_boxes(outputs)
+        return results
 
-        scale = 1
+    def draw_text(self, image, text, color="green"):
+        """ """
+        cv2.putText(
+            image,
+            text=text,
+            org=(3, self.h - 6),  # Bottom-left corner of the text string in the image.
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=1.0,
+            color=self.colors.get(color, "white"),
+        )
+        return image
 
-        for i in range(len(nms_boxes_indices)):
-            index = nms_boxes_indices[i]
-            box = boxes[index]
-            cv.rectangle(
-                image,
-                pt1=(int(box[0] * scale), int(box[1] * scale)),
-                pt2=(
-                    int((box[0] + box[2]) * scale),
-                    int((box[1] + box[3]) * scale),
-                ),
-                color=(0, 255, 0),
-                thickness=1,
-            )
+    def store_image(self, image, subfolder):
+        """ """
+        folder = Path("/", "jevois", "data", subfolder)
+        folder.mkdir(parents=True, exist_ok=True)
+        filename = f"image_{self.n:08d}.png"
+        filepath = str(folder / filename)
+        cv2.imwrite(filepath, img=image)
 
-        cv.imwrite(f"/jevois/data/image_{self.n:08d}.png", original_image)
+    def process(self, inframe, out_frame):
+        """ """
+
+        logger.debug("Starting detection")
+        self.timer.start()
+
+        image_original = inframe.getCvBGR() if self.on_jevois else inframe
+        im_original_drawn = image_original.copy()
+
+        # If the detected image is blurry, skip it
+        if calc_blur(image_original) < MIN_VARIANCE_OF_LAPLACIAN:
+            logger.debug("Blurry image")
+            self.timer.stop()
+            return
+
+        preprocess_results = self.preprocess_image(image_original)
+        image_resized, trans_x, trans_y, h_ratio, w_ratio = preprocess_results
+
+        # boxes = self.detect_objects(image_resized)
+        results = self.detect_objects(image_resized)
+
+        if len(results) < 1:
+            text = "No apps detected"
+            im_original_drawn = self.draw_text(im_original_drawn, text, color="white")
+
+            if self.on_jevois:
+                self.store_image(image_original, subfolder="no_detected")
+                out_frame.sendCv(im_original_drawn)
+
+            self.timer.stop()
+            return
+
+        boxes, scores, selected_app = results[0]
+        boxes = [boxes]
+
+        im_original_drawn = self.draw_text(
+            im_original_drawn, selected_app, color="green"
+        )
+
+        im_original_drawn = draw_boxes(
+            im_original_drawn,
+            boxes,
+            (1 / h_ratio),
+            (1 / w_ratio),
+            trans_x,
+            trans_y,
+        )
+
+        fps = self.timer.stop()
+        logger.debug(f"Finished detection. FPS={fps} fps.")
         self.n += 1
 
-        # Send output frame to host
-        outframe.sendCv(image)
+        if self.on_jevois:
+            self.store_image(image_original, subfolder=f"detected/{selected_app}")
+            out_frame.sendCv(im_original_drawn)
+        elif DEBUG:
+            cv2.imshow(f"Detections", im_original_drawn)
+            cv2.waitKey(0)
+
+
+if __name__ == "__main__":
+    net_path = "runs/detect/train18/weights/best.onnx"
+    automation = TvAutomation(net_path)
+
+    TARGET_DIR = Path("data", "originals")
+    for filename in TARGET_DIR.rglob("*.png"):
+        # cv2.destroyAllWindows()
+        print(f"Analyzing file {filename}")
+        image_original = cv2.imread(str(filename))
+        automation.process(image_original, None)
