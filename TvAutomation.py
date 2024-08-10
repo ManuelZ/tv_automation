@@ -45,7 +45,7 @@ logging.basicConfig(
     filemode="a",
     format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
-    level=logging.DEBUG,
+    level=logging.DEBUG if DEBUG else logging.info,
 )
 logger = logging.getLogger(__name__)
 
@@ -175,28 +175,38 @@ class TvAutomation:
         filepath = str(folder / filename)
         cv2.imwrite(filepath, img=image)
 
-    def process(self, inframe, out_frame):
-        """ """
+    def process(self, in_frame, out_frame):
+        """
+        Process the input frame for object detection and draw results on the output frame.
+
+        Parameters:
+        - in_frame: The input frame containing the image data.
+        - out_frame: The output frame to send the processed image.
+        """
 
         logger.debug("Starting detection")
         self.timer.start()
 
-        image_original = inframe.getCvBGR() if self.on_jevois else inframe
+        # Obtain the image depending on the source
+        image_original = in_frame.getCvBGR() if self.on_jevois else in_frame
         im_original_drawn = image_original.copy()
 
-        # If the detected image is blurry, skip it
+        # Skip processing if the image is too blurry
         if calc_blur(image_original) < MIN_VARIANCE_OF_LAPLACIAN:
             logger.debug("Blurry image")
             self.timer.stop()
             return
 
-        preprocess_results = self.preprocess_image(image_original)
-        image_resized, trans_x, trans_y, h_ratio, w_ratio = preprocess_results
+        # Preprocess the image and get transformation parameters
+        image_resized, trans_x, trans_y, h_ratio, w_ratio = self.preprocess_image(
+            image_original
+        )
 
-        # boxes = self.detect_objects(image_resized)
+        # Detect objects in the preprocessed image
         results = self.detect_objects(image_resized)
+        # boxes = self.detect_objects(image_resized)
 
-        if len(results) < 1:
+        if not results:
             text = "No apps detected"
             im_original_drawn = self.draw_text(im_original_drawn, text, color="white")
 
@@ -207,13 +217,12 @@ class TvAutomation:
             self.timer.stop()
             return
 
+        # Extract detection results
         boxes, scores, selected_app = results[0]
         boxes = [boxes]
 
-        im_original_drawn = self.draw_text(
-            im_original_drawn, selected_app, color="green"
-        )
-
+        # Draw the detection results on the original image
+        im_original_drawn = self.draw_text(im_original_drawn, selected_app)
         im_original_drawn = draw_boxes(
             im_original_drawn,
             boxes,
@@ -224,7 +233,7 @@ class TvAutomation:
         )
 
         fps = self.timer.stop()
-        logger.debug(f"Finished detection. FPS={fps} fps.")
+        logger.debug(f"Finished detection. FPS={fps}.")
         self.n += 1
 
         if self.on_jevois:
