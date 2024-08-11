@@ -1,5 +1,6 @@
 # Standard Library imports
 from math import degrees, cos, sin
+from itertools import count
 import logging
 from typing import Tuple
 
@@ -9,24 +10,31 @@ try:
     from matplotlib import pyplot as plt
 except:
     pass
+
+try:
+    from matplotlib import pyplot as plt
+except:
+    pass
 import cv2
 import numpy as np
 import scipy.stats
 import scipy.signal
 
 # Local imports
-from config import APPS, TARGET_SIZE, DEBUG
-from config import NUM_APPS
+from config import DEBUG, NUM_APPS
 
 logger = logging.getLogger(__name__)
 
 
+def counter(_count=count(1)):
+    """https://stackoverflow.com/a/54715096/1253729"""
+    return next(_count)
+
+
 def center_crop(image: np.ndarray):
     """
-    Crop a square region from the center of the input image.
-
-    Extract a square crop from the center of the input image. The size of the crop is determined by the smaller
-    dimension of the input image (height or width). The resulting crop will have the same width and height.
+    Crop a square region from the center of the input image. The size of the crop is determined by the smaller
+    dimension of the input image (height or width). The resulting crop will have equal width and height.
 
     Args:
         image (numpy.ndarray): The input image array with shape (height, width, channels).
@@ -63,7 +71,7 @@ def box_center_format_to_corner_format(box):
     return [center_x - (0.5 * width), center_y - (0.5 * height), width, height]
 
 
-def get_class_from_prediction(
+def get_prediction_results(
     model_outputs: np.ndarray,
     score_threshold=0.25,
     nms_threshold=0.45,
@@ -98,45 +106,16 @@ def get_class_from_prediction(
         nms_threshold,
         eta,
     )
-
     return [(boxes[i], scores[i], selected_apps[i]) for i in nms_boxes_indices]
 
 
-def get_boxes(
-    model_outputs: np.ndarray, score_threshold=0.25, nms_threshold=0.45, eta=0.5
-):
-    """Extract bounding boxes from model outputs using non-maximum suppression."""
-
-    outputs = cv2.transpose(model_outputs[0])  # n_rows x n_classes
-    rows, cols = outputs.shape
-
-    boxes = []
-    scores = []
-    for i in range(rows):
-        classes_scores = outputs[i][4:]
-        (min_score, max_score, min_idx, max_idx) = cv2.minMaxLoc(classes_scores)
-
-        if max_score >= 0.25:
-            box = box_center_format_to_corner_format(outputs[i])
-            boxes.append(box)
-            scores.append(max_score)
-
-    nms_boxes_indices = cv2.dnn.NMSBoxes(
-        boxes,
-        scores,
-        score_threshold,
-        nms_threshold,
-        eta,
-    )
-
-    return [boxes[i] for i in nms_boxes_indices]
-
-
-def draw_boxes(image, boxes, h_scale=1.0, w_scale=1.0, x_trans=0.0, y_trans=0.0):
+def draw_boxes(image, boxes, inverse_transform_params=((0, 0), (1, 1))):
     """
     The parameter `boxes` has to be represented the using the coordinates of the top-left corner
     along with the width and height.
     """
+
+    ((x_trans, y_trans), (h_ratio, w_ratio)) = inverse_transform_params
 
     im = image.copy()
     for box in boxes:
@@ -144,12 +123,12 @@ def draw_boxes(image, boxes, h_scale=1.0, w_scale=1.0, x_trans=0.0, y_trans=0.0)
         cv2.rectangle(
             im,
             pt1=(
-                int(x_trans + top_left_x * h_scale),
-                int(y_trans + top_left_y * w_scale),
+                int(x_trans + top_left_x * h_ratio),
+                int(y_trans + top_left_y * w_ratio),
             ),  # fmt:skip
             pt2=(
-                int(x_trans + (top_left_x + width) * h_scale),
-                int(y_trans + (top_left_y + height) * w_scale),
+                int(x_trans + (top_left_x + width) * h_ratio),
+                int(y_trans + (top_left_y + height) * w_ratio),
             ),
             color=(0, 255, 0),
             thickness=1,
@@ -209,7 +188,7 @@ def equalize(image, eq_method="CLAHE", grid_size=8):
         return cv2.equalizeHist(image)
 
 
-def equalize_luminance(image, color_space="hsv", eq_method=None, grid_size=8):
+def equalize_light(image, color_space="hsv", eq_method=None, grid_size=8):
     """ """
 
     if color_space == "YCrCb":
@@ -301,16 +280,17 @@ def get_hough_lines(edges, n_std=1.0, threshold=80):
     return filtered_lines, theta
 
 
-def compute_bounding_box_coordinates(box, top_left_x, top_left_y, h_ratio, w_ratio):
+def calc_bbox_tlbr_coords(box, inverse_transform_params):
     """
     Compute the top-left and bottom-right coordinates of a bounding box in the original image.
 
     Args:
         box (tuple): A tuple representing the bounding box, with (x, y, width, height).
-        top_left_x (int): The x-coordinate of the top-left corner of the bounding box in the scaled image.
-        top_left_y (int): The y-coordinate of the top-left corner of the bounding box in the scaled image.
-        h_ratio (float): The height scaling ratio between the scaled and original image.
-        w_ratio (float): The width scaling ratio between the scaled and original image.
+        inverse_transform_params (tuple):
+            top_left_x (int): The x-coordinate of the top-left corner of the bounding box in the scaled image.
+            top_left_y (int): The y-coordinate of the top-left corner of the bounding box in the scaled image.
+            h_ratio (float): The height scaling ratio between the scaled and original image.
+            w_ratio (float): The width scaling ratio between the scaled and original image.
 
     Returns:
         tuple: A tuple containing two tuples:
@@ -320,15 +300,16 @@ def compute_bounding_box_coordinates(box, top_left_x, top_left_y, h_ratio, w_rat
     """
 
     x, y, width, height = box
+    ((top_left_x, top_left_y), (h_ratio, w_ratio)) = inverse_transform_params
 
     # Calculate top-left and bottom-right coordinates in the original image
     top_left = (
-        int(top_left_x + x * (1 / w_ratio)),
-        int(top_left_y + y * (1 / h_ratio)),
+        int(top_left_x + x * w_ratio),
+        int(top_left_y + y * h_ratio),
     )
     bottom_right = (
-        int(top_left_x + (x + width) * (1 / w_ratio)),
-        int(top_left_y + (y + height) * (1 / h_ratio)),
+        int(top_left_x + (x + width) * w_ratio),
+        int(top_left_y + (y + height) * h_ratio),
     )
 
     return top_left, bottom_right
@@ -338,73 +319,50 @@ def resize(image, target_width: int):
     """"""
     h, w = image.shape[:2]
     r = target_width / w
-    target_dim: Tuple[int, int] = (target_width, int(h * r))
+    target_dim = (target_width, int(h * r))
     return cv2.resize(image, target_dim, interpolation=cv2.INTER_AREA)
 
 
-def multiscale_template_matching(
-    template,
-    image,
-    min_scale=0.85,
-    max_scale=1.1,
-    num_scales=5,
-):
-    """
-    Modified from: https://pyimagesearch.com/2015/01/26/multi-scale-template-matching-using-python-opencv/
-    """
-
+def template_matching(template, image, scale):
+    """ """
     image_output = image.copy()
 
     (tH, tW) = template.shape[:2]
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    found = None
 
-    for scale in np.linspace(min_scale, max_scale, num_scales)[::-1]:
-        # Resize to image to have a target width, preserving the aspect ratio
-        target_width = int(image.shape[1] * scale)
-        resized = resize(image, target_width)
+    # Resize to image to have a target width, preserving the aspect ratio
+    target_width = int(image.shape[1] * scale)
+    resized = resize(image, target_width)
 
-        # Take note of the resize ratio (original / new)
-        r = image.shape[1] / float(resized.shape[1])
+    # Take note of the resize ratio (original / new)
+    r = image.shape[1] / float(resized.shape[1])
 
-        # Break if the resized image is smaller than the template
-        if resized.shape[0] < tH or resized.shape[1] < tW:
-            print(f"Resized image is smaller than the template: r={r}")
-            break
+    # Break if the resized image is smaller than the template
+    if resized.shape[0] < tH or resized.shape[1] < tW:
+        raise Exception(f"Resized image is smaller than the template: r={r}")
 
-        result = cv2.matchTemplate(resized, template, cv2.TM_CCOEFF_NORMED)
-        (_, maxVal, _, maxLoc) = cv2.minMaxLoc(result)
+    result = cv2.matchTemplate(resized, template, cv2.TM_CCOEFF_NORMED)
+    (_, max_val, _, max_loc) = cv2.minMaxLoc(result)
 
-        if DEBUG:
-            # clone = np.dstack([resized, resized, resized])
-            cv2.rectangle(
-                resized,
-                (maxLoc[0], maxLoc[1]),
-                (maxLoc[0] + tW, maxLoc[1] + tH),
-                (0, 0, 255),
-                1,
-            )
-            cv2.imshow("Resized image", resized)
-            cv2.waitKey(0)
+    (start_x, start_y) = (int(max_loc[0] * r), int(max_loc[1] * r))
+    (end_x, end_y) = (int((max_loc[0] + tW) * r), int((max_loc[1] + tH) * r))
 
-        # If we have found a new maximum correlation value, then update the bookkeeping variable
-        if found is None or maxVal > found[0]:
-            found = (maxVal, maxLoc, r)
-
-    # Unpack the bookkeeping variable and compute the (x, y) coordinates
-    # of the bounding box based on the resized ratio
-    (_, maxLoc, r) = found
-    (startX, startY) = (int(maxLoc[0] * r), int(maxLoc[1] * r))
-    (endX, endY) = (int((maxLoc[0] + tW) * r), int((maxLoc[1] + tH) * r))
-
+    logger.debug(f"Resizing image using ratio {r:.2f}")
     if DEBUG:
-        cv2.rectangle(image_output, (startX, startY), (endX, endY), (0, 0, 255), 1)
-        cv2.imshow("multiscale_template_matching", image_output)
+        cv2.rectangle(
+            resized,
+            (max_loc[0], max_loc[1]),
+            (max_loc[0] + tW, max_loc[1] + tH),
+            (0, 0, 255),
+            1,
+        )
+        cv2.imshow("Resized image", resized)
+        cv2.rectangle(image_output, (start_x, start_y), (end_x, end_y), (0, 0, 255), 1)
+        cv2.imshow("image_output", image_output)
 
-    return image_output, (startX, startY, endX, endY)
+    return image_output, (start_x, start_y, end_x, end_y)
 
 
-def mask_image(image, angle):
+def extract_masked_patch(image, angle, scale):
     """
 
     Args:
@@ -435,19 +393,19 @@ def mask_image(image, angle):
         template_path = "template.png"
     template = cv2.imread(template_path)
 
-    _, rect = multiscale_template_matching(template, im_rotated)
-    start_x, start_y, end_x, end_y = rect
+    _, (start_x, start_y, end_x, end_y) = template_matching(
+        template, im_rotated, scale=scale
+    )
 
     # Create mask
     im_h = end_y - start_y
     im_w = end_x - start_x
     mask = np.zeros((im_h, im_w), dtype=np.uint8)
     mask[start_y:end_y, :] = 255
-    kernel = np.array([[0, 1, 0], [0, 1, 0], [0, 1, 0]], dtype=np.uint8)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=0)
 
-    # masked_image = cv2.bitwise_and(im_rotated, im_rotated, mask=mask)
     masked_image = im_rotated[start_y:end_y, start_x:end_x]
+
+    cv2.imshow("masked_image", masked_image)
 
     return masked_image, end_y
 
@@ -468,8 +426,8 @@ def call_while_error(func, varying_parameter, factor, max_retries=3, **kwargs):
         except Exception as e:
             retries += 1
             kwargs[varying_parameter] *= factor
-            print(f"Error: '{e}'.")
-            print(
+            logger.exception("")
+            logger.debug(
                 "    Retrying ({}/{}) with {}={:.2f}".format(
                     retries,
                     max_retries,
@@ -478,6 +436,7 @@ def call_while_error(func, varying_parameter, factor, max_retries=3, **kwargs):
                 )
             )
             if retries >= max_retries:
+                logger.error(f"Reached max number of retries: {max_retries}")
                 raise
 
 
@@ -542,15 +501,16 @@ def identify_selected_app_v1(image, max_y, apps, num_segments=9):
     return apps[index]
 
 
-def plot_segments(image, derivative, peaks, title, app_name):
+def plot_segments(image, derivative, peaks, title):
     """ """
 
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
 
     if len(image.shape) == 2:
         ax[0].imshow(image, cmap="gray", vmin=0, vmax=255)
     else:
-        ax[0].imshow(image)
+        ax[0].imshow(image_rgb)
 
     # Plot peaks and signal
     ax[1].plot(derivative)
@@ -558,7 +518,8 @@ def plot_segments(image, derivative, peaks, title, app_name):
     ax[1].margins(x=0)
     ax[1].grid()
 
-    plt.suptitle(f"{title}: {app_name}")
+    plt.suptitle(f"{title}")
+    plt.tight_layout()
     plt.show()
 
 
@@ -591,67 +552,85 @@ def get_inverted_gaussian_mask(image, sigma_ratio=8):
 
 def get_apps_sizes(image):
     """ """
-    image = equalize_luminance(image, "lab", eq_method="CLAHE")
+    image = equalize_light(image, "lab", eq_method="CLAHE")
     inverted_gauss_mask = get_inverted_gaussian_mask(image, sigma_ratio=12)
-    # cv2.imshow("inverted_gauss_mask", inverted_gauss_mask)
 
     if len(image.shape) == 3:
         derivative = np.gradient(image, axis=1)
         derivative = np.power(derivative, 2)
         derivative = derivative * inverted_gauss_mask
-        # derivative = scale_to_range(derivative)
         derivative = np.median(derivative, axis=0)
         derivative = np.sum(derivative, axis=1)
+        derivative = np.where(derivative > 0, np.log(derivative), 0)
 
     else:
         derivative = np.gradient(image, axis=0)
         derivative = np.power(derivative, 2)
         derivative = derivative * inverted_gauss_mask
         derivative = np.median(derivative, axis=0)
-        # derivative = scale_to_range(derivative)
 
     peaks, _ = scipy.signal.find_peaks(derivative, height=0, distance=20)
 
     return peaks, derivative
 
 
-def identify_selected_app_v2(image, apps):
+class PeaksError(Exception):
+    pass
+
+
+def draw_vertical_segments(image, peaks):
+    h, w = image.shape[:2]
+    for i in peaks:
+        cv2.line(image, (i, 0), (i, h), (0, 255, 0), thickness=1, lineType=cv2.LINE_AA)
+
+
+def identify_selected_app_v2(
+    im_patch, apps, mean_lines_angle, scale, app_width_factor=0.8
+):
     """ """
 
-    # TODO: Gotta do the same but only on the edges of the apps
-    # TODO: Autocorrect itself. Get the mean size of each rectangle and if it finds one way too small
-    # then merge those adjacent rectangles
+    # Extract masked patch and compute maximum y-coordinate
+    im_patch_masked, _ = extract_masked_patch(im_patch, mean_lines_angle, scale)
 
-    peaks, derivative = get_apps_sizes(image)
+    # Get app sizes and compute distances between peaks
+    peaks, derivative = get_apps_sizes(im_patch_masked)
+    dist_between_peaks = np.diff(peaks)
 
-    if len(peaks) < NUM_APPS + 1:
-        if DEBUG:
-            plot_segments(image, derivative, peaks, "", "Incorrect number of peaks")
-        raise Exception(f"Found LESS peaks than expected: {len(peaks)}")
+    # Compute the median width of detected applications and define a threshold to identify potentially small
+    # applications. Applications with widths below this threshold are considered too small.
+    median_app_width = np.median(dist_between_peaks)
+    low_threshold = app_width_factor * median_app_width
+    small_apps = dist_between_peaks < low_threshold
 
-    if len(peaks) > NUM_APPS + 1:
+    draw_vertical_segments(im_patch_masked, peaks)
+
+    num_peaks = len(peaks)
+    if num_peaks < NUM_APPS + 1:
+        raise PeaksError(f"Found LESS peaks than expected: {len(peaks)}")
+
+    if num_peaks > NUM_APPS + 1:
         logger.error(
             f"Found MORE peaks than expected, discarding {len(peaks) - (NUM_APPS + 1)}"
         )
         peaks = peaks[: NUM_APPS + 1]
 
-    dist_between_peaks = np.diff(peaks)
+    if any(small_apps):
+        small_widths = dist_between_peaks[small_apps]
+        logger.error(
+            f"Median app width={median_app_width:.2f}. "
+            f"Apps widths smaller than {low_threshold:.1f} = {small_widths}"
+        )
+
+        msg = "Detected app size is too small"
+        if DEBUG:
+            plot_segments(im_patch_masked, derivative, peaks, msg)
+
+        raise Exception(msg)
+
     app_index = np.argmax(dist_between_peaks)
     app_name = apps[app_index]
 
     if DEBUG:
-        h, w = image.shape[:2]
-        # Draw vertical green lines to visualize the segments
-        for i in peaks:
-            cv2.line(
-                image,
-                pt1=(i, 0),
-                pt2=(i, h),
-                color=(0, 255, 0),
-                thickness=1,
-                lineType=cv2.LINE_AA,
-            )
-        cv2.imshow("segments", image)
-        plot_segments(image, derivative, peaks, "", app_name)
+        plot_segments(im_patch_masked, derivative, peaks, app_name)
 
     return app_name
