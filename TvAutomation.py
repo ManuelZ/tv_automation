@@ -63,7 +63,6 @@ class TvAutomation:
         self.on_jevois = "pyjevois" in globals()
 
         # Configured camera sensor resolution. Ensure it's the same as the one in videomappings.cfg
-        # FIXME: Maybe set this with an actual image
         self.original_height, self.original_width = (480, 640)
 
         # Resized image height passed to network
