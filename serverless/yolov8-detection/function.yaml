@@ -1,0 +1,43 @@
+metadata:
+  name: Custom_YoloV8
+  namespace: cvat
+  annotations:
+    name: Custom_YoloV8
+    type: detector
+    spec: |
+      [     
+        { "id": 0, "name": "youtube", "type": "rectangle" },
+        { "id": 1, "name": "television", "type": "rectangle" },
+        { "id": 2, "name": "netflix", "type": "rectangle" },
+        { "id": 3, "name": "max", "type": "rectangle" },
+        { "id": 4, "name": "internet", "type": "rectangle" },
+        { "id": 5, "name": "prime_video", "type": "rectangle" },
+        { "id": 6, "name": "live_tv", "type": "rectangle" },
+        { "id": 7, "name": "movistar_tv_app", "type": "rectangle" },
+        { "id": 8, "name": "spotify", "type": "rectangle" }, 
+      ]
+
+spec:
+  description: UltralyticsYoloV8
+  runtime: 'python:3.11'
+  handler: main:handler
+  eventTimeout: 30s
+
+  build:
+    image: custom_ultralytics_cpu_yolov8_nano_nuclio
+    baseImage: custom_ultralytics_cpu_yolov8_nano:latest
+
+  triggers:
+    myHttpTrigger:
+      maxWorkers: 2
+      kind: 'http'
+      workerAvailabilityTimeoutMilliseconds: 10000
+      attributes:
+        maxRequestBodySize: 33554432 # 32MB
+
+  platform:
+    attributes:
+      restartPolicy:
+        name: always
+        maximumRetryCount: 3
+      mountMode: volume
