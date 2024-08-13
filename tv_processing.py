@@ -405,8 +405,6 @@ def extract_masked_patch(image, angle, scale):
 
     masked_image = im_rotated[start_y:end_y, start_x:end_x]
 
-    cv2.imshow("masked_image", masked_image)
-
     return masked_image, end_y
 
 

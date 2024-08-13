@@ -20,8 +20,6 @@ from tv_processing import (
     draw_boxes,
     get_prediction_results,
     counter,
-)
-from tv_processing import (
     calc_bbox_tlbr_coords,
     crop_image_patch,
     equalize_light,
@@ -87,9 +85,9 @@ class TvAutomation:
         if self.on_jevois:
             self.timer = jevois.Timer("TV Automation", 10, jevois.LOG_DEBUG)
             net_path = Path(
-                pyjevois.share + "dnn", "custom", "tv_apps_detect_and_classify.onnx"
+                pyjevois.share, "dnn", "custom", "tv_apps_detect_and_classify.onnx"
             )
-        assert net_path is not None and Path(net_path).is_file()
+        assert net_path is not None and Path(net_path).is_file(), net_path
 
         self.net = cv2.dnn.readNet(net_path, "")
         self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
@@ -179,6 +177,9 @@ class TvAutomation:
 
     def store_image(self, image, subfolder):
         """ """
+        if not DEBUG:
+            return
+
         folder = Path("/", "jevois", "data", subfolder)
         folder.mkdir(parents=True, exist_ok=True)
         filename = f"image_{counter():08d}.png"
@@ -331,14 +332,15 @@ class TvAutomation:
             self.handle_detections(
                 im_orig, object_detection_results, inv_transform_params, out_frame
             )
-            # Add the Classical CV solution
-            self.classical_cv_solution(
-                im_orig,
-                im_resized,
-                out_frame,
-                object_detection_results,
-                inv_transform_params,
-            )
+
+            # # Add the Classical CV solution
+            # self.classical_cv_solution(
+            #     im_orig,
+            #     im_resized,
+            #     out_frame,
+            #     object_detection_results,
+            #     inv_transform_params,
+            # )
 
 
 if __name__ == "__main__":
