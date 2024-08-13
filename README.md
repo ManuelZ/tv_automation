@@ -61,7 +61,7 @@ use multiple classes—specifically, 9 different classes. So there is a 4th poss
 
 This is what the end result looks like:
 
-[object_detection_solution_encoded.mp4](media/object_detection_solution_encoded.mp4)
+https://github.com/user-attachments/assets/aff52a3f-d1c6-4c33-8085-f6118e5dfaa2
 
 The JeVois is connected to a laptop via USB. On the laptop, I receive the JeVois video feed using the OBS Studio program.
 All computer vision processing occurs on the JeVois; the laptop is used solely for visualizing the results.
