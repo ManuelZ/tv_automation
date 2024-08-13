@@ -1,0 +1,14 @@
+path: << Absolute path towards the data folder >>
+train: train # train images (relative to path)
+val: val # val images (relative to path)
+
+names:
+  0: youtube
+  1: television
+  2: netflix
+  3: max
+  4: internet
+  5: prime_video
+  6: live_tv
+  7: movistar_tv_app
+  8: spotify
