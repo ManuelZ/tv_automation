@@ -14,7 +14,7 @@ metadata:
         { "id": 5, "name": "prime_video", "type": "rectangle" },
         { "id": 6, "name": "live_tv", "type": "rectangle" },
         { "id": 7, "name": "movistar_tv_app", "type": "rectangle" },
-        { "id": 8, "name": "spotify", "type": "rectangle" }, 
+        { "id": 8, "name": "spotify", "type": "rectangle" }
       ]
 
 spec:
