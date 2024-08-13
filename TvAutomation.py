@@ -2,6 +2,7 @@
 from pathlib import Path
 import logging
 from typing import Tuple
+import time
 
 # External imports
 try:
@@ -40,7 +41,7 @@ else:
 logging.basicConfig(
     format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
-    level=logging.DEBUG if DEBUG else logging.info,
+    level=logging.DEBUG if DEBUG else logging.INFO,
     handlers=[logging.FileHandler(log_filepath, mode="a"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
@@ -48,12 +49,15 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 
-class DummyTimer:
+class Timer:
+    def __init__(self):
+        self.start_time = None
+
     def start(self):
-        return
+        self.start_time = time.monotonic()
 
     def stop(self):
-        return
+        return f"{1 / (time.monotonic() - self.start_time):.2f} fps"
 
 
 class TvAutomation:
@@ -79,8 +83,10 @@ class TvAutomation:
             "red": (0, 0, 255),
             "white": (255, 255, 255),
         }
+        self.font = cv2.FONT_HERSHEY_SIMPLEX
+        self.font_size = 1.0
 
-        self.timer = DummyTimer()
+        self.timer = Timer()
 
         if self.on_jevois:
             self.timer = jevois.Timer("TV Automation", 10, jevois.LOG_DEBUG)
@@ -161,18 +167,19 @@ class TvAutomation:
         results = get_prediction_results(outputs, classes=self.classes)
         return results
 
-    def draw_text(self, image, text, color="green"):
+    def draw_text(self, image, text, color="green", position=None):
         """ """
+        # Defaults to bottom-left corner of the text string in the image.
+        position = (3, self.original_height - 6) if position is None else position
         return cv2.putText(
-            image,
-            text=text,
-            org=(
-                3,
-                self.original_height - 6,
-            ),  # Bottom-left corner of the text string in the image.
-            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=1.0,
-            color=self.colors.get(color, "white"),
+            image, text, position, self.font, self.font_size, self.colors.get(color)
+        )
+
+    def draw_fps(self, image, text):
+        """ """
+        position = (int(self.original_width * (2 / 3)), self.original_height - 6)
+        return cv2.putText(
+            image, text, position, self.font, self.font_size, self.colors.get("white")
         )
 
     def store_image(self, image, subfolder):
@@ -288,10 +295,11 @@ class TvAutomation:
         box, score, selected_app = object_detection_results[0]
 
         # Draw the detection results on the original image
-        im_drawn = self.draw_text(im_drawn, selected_app)
+        im_drawn = self.draw_text(im_drawn, selected_app, color="green")
         im_drawn = draw_boxes(im_drawn, [box], inv_transform_params)
 
         fps = self.timer.stop()
+        im_drawn = self.draw_fps(im_drawn, fps)
         logger.debug(f"Finished detection. FPS={fps}.")
 
         self._process_and_display(
