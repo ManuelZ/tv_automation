@@ -57,7 +57,7 @@ def get_yolov8_results_for_cvat(predictions, classes, conf_threshold=0.4):
                         "type": "rectangle",
                     }
                 )
-    print(results)
+
     return results
 
 
