@@ -14,7 +14,7 @@ regular television. The specific issues could be:
 I’ll explore a solution to these problems by:
 
 - Using computer vision to provide feedback on the current TV state
-- Using a microcontroller to send IR signals to the TV
+- Using a microcontroller to send IR signals to the TV (coming soon...)
 
 I have at hand a [JeVois-A33 "Smart Machine Vision Camera"](https://www.jevoisinc.com/products/jevois-a33-smart-machine-vision-camera) with the following high level specs:
 
@@ -30,7 +30,7 @@ I started with a VGA (640 x 480) resolution as a baseline for my experiments. In
 
 Here's an example of an image captured at night with low light conditions:
 
-![capture_example.png](images/capture_example.png)
+![capture_example.png](media/capture_example.png)
 
 This image shows a Smart TV with the applications bar open at the bottom of the screen. It displays 9 applications: 
 YouTube, Television, Netflix, Max, Internet, Prime, Television over Internet, a TV provider application 
@@ -58,6 +58,13 @@ simultaneously handles both classification and detection. I had been using a sin
 use multiple classes—specifically, 9 different classes. So there is a 4th possible solution:
 
 4) Object detection to simultaneously detect the TV apps bar and classify it into 9 different classes. 
+
+This is what the end result looks like:
+
+[object_detection_solution_encoded.mp4](media/object_detection_solution_encoded.mp4)
+
+The JeVois is connected to a laptop via USB. On the laptop, I receive the JeVois video feed using the OBS Studio program.
+All computer vision processing occurs on the JeVois; the laptop is used solely for visualizing the results.
 
 ## The full object detection solution
 
@@ -103,7 +110,7 @@ docker compose up -d
 ```
 
 This is how the CVAT interface looks like:
-![cvat_manual_annotation.png](images/cvat_manual_annotation.png)
+![cvat_manual_annotation.png](media/cvat_manual_annotation.png)
 
 ## Training an object detection model 
 
@@ -184,7 +191,7 @@ memory=6GB
 
 Finally, Nuclio was up, its UI could be accessed through `localhost:8070`:
 
-![nuclio_interface.png](images/nuclio_interface.png)
+![nuclio_interface.png](media/nuclio_interface.png)
 
 ## Deploying a function for automatic annotation
 The CVAT tutorial then suggest to use the Nuclio command line `nuctl` to deploy a new function. I was having trouble 
@@ -195,9 +202,9 @@ This is what I needed to do for deploying and re-deploying a Nuclio function:
 at this step).
 - Reference this Docker image on a `config.yml` file that Nuclio uses. 
 - Create a new Nuclio service using the UI, passing the same `config.yml` YAML file mentioned above.
-![nuclio_create_function.png](images/nuclio_create_function.png)
+![nuclio_create_function.png](media/nuclio_create_function.png)
 - Paste the Python code that does inference in the Nuclio UI and clicking "deploy"
-![nuclio_deploy.png](images/nuclio_deploy.png)
+![nuclio_deploy.png](media/nuclio_deploy.png)
 
 Nuclio uses the provided Docker image as base image when creating the image that's finally used. It does this 
 transparently and adds the inference code that was provided through the UI.
@@ -209,9 +216,9 @@ docker build -f serverless/Dockerfile -t custom_ultralytics_cpu_yolov8_nano .
 
 Finally, from the CVAT UI one can do auto annotation using the model serviced by Nuclio:
 
-![cvat_automatic_annotation_1.png](images/cvat_automatic_annotation_1.png)
+![cvat_automatic_annotation_1.png](media/cvat_automatic_annotation_1.png)
 
-![cvat_automatic_annotation_2.png](images/cvat_automatic_annotation_2.png)
+![cvat_automatic_annotation_2.png](media/cvat_automatic_annotation_2.png)
 
 (I don't know why there are two columns of classes in the above image).
 
@@ -237,11 +244,12 @@ subsets and that cannot be changed later. This is why I split them randomly into
 ## Improving Deep Learning results
 
 - While correcting automatic annotations, I noticed confusion between two apps. Both apps had similar colors, which could 
-have contributed to the confusion. Later, when I opened CVAT to verify my previous annotation tasks, I discovered an 
-image with two overlapping boxes, each representing one of those classes.
+have contributed to the confusion. Later, when I opened CVAT to verify my previous annotation tasks, I discovered one 
+image with two overlapping boxes, each representing one of those classes, and one image showing app 1 but with an
+annotation of the app 2 class.
 
-- During the transition between apps, the icon sizes change, and I sometimes capture images of these transitions. It is 
-not always clear which app has the larger icon size.
+- During the transition between apps, the icon sizes change, and I sometimes capture images of these transitions. 
+
 
 ### About image sizes
 YoloV8 can automatically resize input images and annotations to match the desired target size.
@@ -260,5 +268,5 @@ approach ensures that the television, which is expected to be centered, remains 
 more details compared to the 192x256 version.
  
 # References
-https://docs.cvat.ai/docs/manual/advanced/serverless-tutorial/
-https://docs.ultralytics.com/modes/predict/#boxes
+- https://docs.cvat.ai/docs/manual/advanced/serverless-tutorial/
+- https://docs.ultralytics.com/modes/predict/#boxes
