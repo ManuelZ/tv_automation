@@ -73,9 +73,9 @@ class TvAutomation:
         # Value scaling factor applied to input pixels
         self.scale = 1.0 / 255
 
-        # FIXME: When I use the mean I get no identifications.
-        # self.mean = [123.68, 116.77, 103.93]
-        self.mean = [0, 0, 0]
+        # Note: YOLOv8 doesn't do mean subtraction
+        # https://github.com/ultralytics/ultralytics/issues/10111)
+
         self.apps = APPS
         self.classes = list(self.apps.values())
         self.colors = {
@@ -159,7 +159,6 @@ class TvAutomation:
             scalefactor=self.scale,
             size=(self.target_height, self.target_width),
             swapRB=True,
-            mean=(0, 0, 0),  # Adjust mean values if necessary
             crop=False,
         )
         self.net.setInput(blob)
