@@ -390,7 +390,7 @@ def extract_masked_patch(image, angle, scale):
     if "pyjevois" in globals():
         template_path = pyjevois.share + "/template.png"
     else:
-        template_path = "template.png"
+        template_path = "../../../template.png"
     template = cv2.imread(template_path)
 
     _, (start_x, start_y, end_x, end_y) = template_matching(

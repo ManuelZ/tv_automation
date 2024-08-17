@@ -1,0 +1,1 @@
+Place here the ONNX model named "tv_apps_detect_and_classify.onnx"

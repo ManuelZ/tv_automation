@@ -34,9 +34,9 @@ from localization import BayesFilter
 
 
 if "pyjevois" in globals():
-    log_filepath = Path("/", "jevois", "data", "log.log")
+    log_filepath = Path("/", "jevois", "../../../data", "log.log")
 else:
-    log_filepath = Path("log.log")
+    log_filepath = Path("../../../log.log")
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
@@ -186,7 +186,7 @@ class TvAutomation:
         if not DEBUG:
             return
 
-        folder = Path("/", "jevois", "data", subfolder)
+        folder = Path("/", "jevois", "../../../data", subfolder)
         folder.mkdir(parents=True, exist_ok=True)
         filename = f"image_{counter():08d}.png"
         filepath = str(folder / filename)
@@ -351,10 +351,10 @@ class TvAutomation:
 
 
 if __name__ == "__main__":
-    net_path = "runs/detect/train18/weights/best.onnx"
+    net_path = "../../../runs/detect/train18/weights/best.onnx"
     automation = TvAutomation(net_path)
 
-    TARGET_DIR = Path("data", "originals")
+    TARGET_DIR = Path("../../../data", "originals")
     for filename in TARGET_DIR.rglob("*.png"):
         # cv2.destroyAllWindows()
         print(f"Analyzing file {filename}")

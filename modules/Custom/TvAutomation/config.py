@@ -15,7 +15,7 @@ TARGET_W = 256
 TARGET_H = 256
 TARGET_SIZE = (TARGET_H, TARGET_W)
 MARGIN_X = 1
-DEBUG = False
+DEBUG = True
 
 # For blur detection, higher is better
 MIN_VARIANCE_OF_LAPLACIAN = 35
