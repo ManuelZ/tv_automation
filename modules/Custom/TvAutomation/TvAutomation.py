@@ -351,10 +351,11 @@ class TvAutomation:
 
 
 if __name__ == "__main__":
-    net_path = "../../../runs/detect/train18/weights/best.onnx"
-    automation = TvAutomation(net_path)
+    NET_PATH = Path("runs", "detect", "train20", "weights", "best.onnx")
+    TARGET_DIR = Path("data", "originals")
 
-    TARGET_DIR = Path("../../../data", "originals")
+    automation = TvAutomation(NET_PATH)
+
     for filename in TARGET_DIR.rglob("*.png"):
         # cv2.destroyAllWindows()
         print(f"Analyzing file {filename}")
