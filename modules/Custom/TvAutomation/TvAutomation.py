@@ -36,7 +36,7 @@ from localization import BayesFilter
 if "pyjevois" in globals():
     log_filepath = Path("/", "jevois", "../../../data", "log.log")
 else:
-    log_filepath = Path("../../../log.log")
+    log_filepath = Path("log.log")
 
 logging.basicConfig(
     format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
@@ -357,7 +357,6 @@ if __name__ == "__main__":
     automation = TvAutomation(NET_PATH)
 
     for filename in TARGET_DIR.rglob("*.png"):
-        # cv2.destroyAllWindows()
         print(f"Analyzing file {filename}")
         im_orig = cv2.imread(str(filename))
         automation.process(im_orig, None)
