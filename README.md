@@ -278,10 +278,9 @@ I collected additional examples of this class to help the model improve its accu
 # Conclusion
 
 This project showcases a practical application of computer vision to improve TV remote usability for older adults. By 
-employing object detection techniques and enhancing data management practices, the solution provides precise feedback on
-the current TV state and progressively refines the model's performance. Combining real-time object detection with edge 
-computing, the project utilizes the JeVois-A33 camera and YOLOv8 to effectively detect and interpret TV interfaces, 
-ensuring a more intuitive and accessible user experience.
+employing object detection techniques the solution provides precise feedback on the current TV state. Combining real-time 
+object detection with edge computing, the project utilizes the JeVois-A33 camera and YOLOv8 to detect and interpret TV interfaces, 
+aiming to provide a more intuitive and accessible user experience.
 
 # References
 - https://docs.cvat.ai/docs/manual/advanced/serverless-tutorial/
