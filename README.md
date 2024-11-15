@@ -203,10 +203,10 @@ at this step).
 - Reference this Docker image on a `config.yml` file that Nuclio uses. 
 - Create a new Nuclio service using the UI, passing the same `config.yml` YAML file mentioned above.
 ![nuclio_create_function.png](media/nuclio_create_function.png)
-- Paste the Python code that does inference in the Nuclio UI and clicking "deploy"
+- Paste the Python code that does inference in the Nuclio UI and click "deploy":
 ![nuclio_deploy.png](media/nuclio_deploy.png)
 
-Nuclio uses the provided Docker image as base image when creating the image that's finally used. It does this 
+Nuclio uses the provided Docker image as a base image when creating the image that's finally used. It does this 
 transparently and adds the inference code that was provided through the UI.
 
 To create the base image:
